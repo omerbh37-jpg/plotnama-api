@@ -20,7 +20,8 @@
     "pg": "^8.16.3",
     "pg-connection-string": "^2.6.2",
     "postgres": "^3.4.7",
-    "@supabase/supabase-js": "^2.45.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "serverless-http": "^3.2.0"
 
   }
 }
