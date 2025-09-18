@@ -802,9 +802,16 @@ app.get('/db-ping', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`API on http://0.0.0.0:${PORT}`);
-});
+// On Vercel, export the app (no listen). Locally, still listen.
+if (process.env.VERCEL) {
+  module.exports = app;
+} else {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`API on http://0.0.0.0:${PORT}`);
+  });
+}
+
+
 
 
 
