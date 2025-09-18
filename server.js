@@ -5,10 +5,10 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const { parse } = require('pg-connection-string');
-const bcrypt = require('bcryptjs');
+
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
-
+const bcrypt = require('bcryptjs');
 
 
 const raw = process.env.PG_CONNECTION_STRING || process.env.DATABASE_URL;
@@ -808,6 +808,7 @@ if (process.env.VERCEL) {
     console.log(`API on http://0.0.0.0:${PORT}`);
   });
 }
+
 
 
 
