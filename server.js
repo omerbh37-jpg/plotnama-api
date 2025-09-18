@@ -40,11 +40,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type','Authorization','X-Device-Id','X-Device-Type','X-Admin-Secret']
 
 }));
-// CORS (Express 5 friendly)
-app.use(cors({
-  origin: '*',
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-Device-Id','X-Device-Type','X-Admin-Secret']
+
 
 }));
 
@@ -66,7 +62,7 @@ app.use(express.json());
 
 // Vercel has a read-only filesystem. We no longer use local uploads.
 // (Screenshots go to Supabase Storage.)
-const fs = require('fs'); // keep if you use fs elsewhere
+
 // const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 // if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // app.use('/uploads', express.static(UPLOAD_DIR));
@@ -812,6 +808,7 @@ if (process.env.VERCEL) {
     console.log(`API on http://0.0.0.0:${PORT}`);
   });
 }
+
 
 
 
