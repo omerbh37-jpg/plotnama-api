@@ -6,6 +6,8 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const { parse } = require('pg-connection-string');
 const bcrypt = require('bcryptjs');
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
 
 
 
@@ -550,10 +552,33 @@ app.get('/listings', async (req, res) => {
 
 /* ============ PAYMENTS (screenshot upload) ============ */
 
-const upload = multer({ dest: UPLOAD_DIR });
+const upload = multer({ storage: multer.memoryStorage() });
+
 app.post('/payments', requireAuth, upload.single('screenshot'), async (req, res) => {
   const { method, amount, period_days } = req.body || {};
-  const fileUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    let fileUrl = null;
+  if (req.file) {
+    const ext = (path.extname(req.file.originalname || '') || '.jpg').toLowerCase();
+    const key = `${req.user.uid}/${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
+
+    const { error: upErr } = await supabase
+      .storage
+      .from('billing')       // bucket name
+      .upload(key, req.file.buffer, {
+        contentType: req.file.mimetype || 'application/octet-stream',
+        upsert: false
+      });
+
+    if (upErr) {
+      console.error('Supabase upload error:', upErr);
+      return res.status(500).json({ error: 'upload_failed' });
+    }
+
+    // If the bucket is public, this gives a public HTTPS link:
+    const { data } = supabase.storage.from('billing').getPublicUrl(key);
+    fileUrl = data.publicUrl;
+  }
+
 
   const { rows } = await pool.query(
     `insert into payments (user_id, method, amount, period_days, screenshot_url, verification_status)
@@ -780,6 +805,7 @@ app.get('/db-ping', async (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API on http://0.0.0.0:${PORT}`);
 });
+
 
 
 
