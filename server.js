@@ -42,7 +42,7 @@ app.use(cors({
 }));
 
 
-}));
+
 
 // Preflight handler for ALL paths (no wildcards that break in Express 5)
 app.use((req, res, next) => {
@@ -808,6 +808,7 @@ if (process.env.VERCEL) {
     console.log(`API on http://0.0.0.0:${PORT}`);
   });
 }
+
 
 
 
