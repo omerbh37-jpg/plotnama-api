@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-
+const app = express();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -794,7 +794,7 @@ const PORT = process.env.PORT || 8080;
 // simple homepage
 app.get('/', (req, res) => {
   res.type('text').send(
-    'DealerBook API is running.\n\n' +
+    'DealerBook API is running (v-0922a).\n\n' +  // <-- add a tag
     'POST /auth/signup  { email }\n' +
     'POST /auth/verify  { email, code }\n' +
     'GET  /me           (Authorization: Bearer <token>)\n' +
@@ -804,6 +804,7 @@ app.get('/', (req, res) => {
     'GET  /db-ping'
   );
 });
+
 
 // DB ping route (checks connection to Supabase)
 app.get('/db-ping', async (req, res) => {
@@ -833,6 +834,7 @@ app.get('/debug-email', async (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API on http://0.0.0.0:${PORT}`);
 });
+
 
 
 
