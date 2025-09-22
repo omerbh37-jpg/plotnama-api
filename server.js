@@ -5,10 +5,8 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const { parse } = require('pg-connection-string');
-
-const { createClient } = require('@supabase/supabase-js');
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
 const bcrypt = require('bcryptjs');
+
 
 
 const raw = process.env.PG_CONNECTION_STRING || process.env.DATABASE_URL;
@@ -32,17 +30,39 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+// === Email (Resend) ===
+// === Email (Resend) ===
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY || '');
 
-const app = express();
+async function sendOtpEmail(to, code) {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      console.warn('RESEND_API_KEY missing => skipping email (DEV fallback will return OTP)');
+      return false; // tell caller to fallback
+    }
+    const from = process.env.EMAIL_FROM || 'PlotNama <no-reply@plotnama.com>';
+    const r = await resend.emails.send({
+      from,
+      to,
+      subject: 'Your PlotNama OTP',
+      text: `Your PlotNama code is: ${code}\n\nIt expires in 10 minutes.`,
+    });
+    console.log('Resend ok:', r?.id || r); // helpful for logs
+    return true;
+  } catch (err) {
+    console.error('Resend send error:', err?.message || err);
+    return false; // let caller fallback or show message
+  }
+}
+
+// CORS (Express 5 friendly)
 app.use(cors({
   origin: '*',
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','X-Device-Id','X-Device-Type','X-Admin-Secret']
 
 }));
-
-
-
 
 // Preflight handler for ALL paths (no wildcards that break in Express 5)
 app.use((req, res, next) => {
@@ -60,13 +80,11 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Vercel has a read-only filesystem. We no longer use local uploads.
-// (Screenshots go to Supabase Storage.)
-
-// const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
-// if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-// app.use('/uploads', express.static(UPLOAD_DIR));
-
+// static serving for uploaded screenshots
+const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+app.use('/uploads', express.static(path.join(__dirname, UPLOAD_DIR)));
+console.log('PG_CONNECTION_STRING =', process.env.PG_CONNECTION_STRING || '(missing)');
 
 
 
@@ -253,8 +271,10 @@ app.post('/auth/signup', async (req, res) => {
      returning *`,
     [email]
   );
-  const code = String(Math.floor(100000 + Math.random()*900000)); // 6-digit
-  const expiresAt = new Date(Date.now() + 10*60*1000); // 10 minutes
+
+  // issue OTP (6-digit, 10 min)
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   await pool.query(
     `insert into otps (email, code, expires_at)
@@ -263,9 +283,14 @@ app.post('/auth/signup', async (req, res) => {
     [email, code, expiresAt.toISOString()]
   );
 
-  // prototype: return OTP in response
-  res.json({ ok: true, otp_for_testing: code });
+  // try to email; if no RESEND key, fall back to dev behavior
+  const emailed = await sendOtpEmail(email, code);
+  if (!emailed) {
+    return res.json({ ok: true, otp_for_testing: code }); // DEV fallback
+  }
+  return res.json({ ok: true, message: 'OTP sent' });
 });
+
 
 /**
  * POST /auth/verify { email, code }
@@ -325,33 +350,46 @@ const replace     = String(req.header('x-replace-device') || '') === '1';
  * Creates/updates user with password, then sends OTP for second factor.
  */
 app.post('/auth/register', async (req, res) => {
-  const { email, password, confirm } = req.body || {};
-  if (!email || !password || !confirm) return res.status(400).json({ error: 'missing_fields' });
-  if (password !== confirm) return res.status(400).json({ error: 'password_mismatch' });
-  if (password.length < 6) return res.status(400).json({ error: 'weak_password' });
+  try {
+    const { email, name } = req.body || {};
+    if (!email) return res.status(400).json({ error: 'email_required' });
 
-  const hash = await bcrypt.hash(password, 10);
+    // Upsert user (keep whatever columns you already have)
+    const u = await pool.query(
+      `insert into app_users (email, name)
+       values ($1, $2)
+       on conflict (email) do update set name = coalesce(excluded.name, app_users.name)
+       returning *`,
+      [email, name || null]
+    );
 
-  // upsert user + password
-  const u = await pool.query(
-    `insert into app_users (email, password_hash) values ($1,$2)
-     on conflict (email) do update set password_hash=excluded.password_hash
-     returning *`, [email, hash]
-  );
+    // --- issue OTP (6-digit, 10 minutes) ---
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-  // issue OTP (6-digit, 10 min)
-  const code = String(Math.floor(100000 + Math.random()*900000));
-  const expiresAt = new Date(Date.now() + 10*60*1000);
-  await pool.query(
-    `insert into otps (email, code, expires_at)
-     values ($1,$2,$3)
-     on conflict (email) do update set code=$2, expires_at=$3`,
-    [email, code, expiresAt.toISOString()]
-  );
+    await pool.query(
+      `insert into otps (email, code, expires_at)
+       values ($1, $2, $3)
+       on conflict (email) do update set code = $2, expires_at = $3`,
+      [email, code, expiresAt.toISOString()]
+    );
 
-  // DEV ONLY: return OTP. In prod: send via email and don't return it.
-  res.json({ ok: true, next: 'otp', otp_for_testing: code });
+    // --- try to email the OTP (uses the helper we added earlier) ---
+    const emailed = await sendOtpEmail(email, code);
+
+    if (!emailed) {
+      // DEV fallback if RESEND_API_KEY not set: return OTP so you can still test
+      return res.json({ ok: true, next: 'otp', otp_for_testing: code });
+    }
+
+    // Production behavior: do NOT reveal the OTP
+    return res.json({ ok: true, next: 'otp', message: 'OTP sent' });
+  } catch (err) {
+    console.error('register error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
 });
+
 
 /**
  * POST /auth/login { email, password }
@@ -550,33 +588,10 @@ app.get('/listings', async (req, res) => {
 
 /* ============ PAYMENTS (screenshot upload) ============ */
 
-const upload = multer({ storage: multer.memoryStorage() });
-
+const upload = multer({ dest: UPLOAD_DIR });
 app.post('/payments', requireAuth, upload.single('screenshot'), async (req, res) => {
   const { method, amount, period_days } = req.body || {};
-    let fileUrl = null;
-  if (req.file) {
-    const ext = (path.extname(req.file.originalname || '') || '.jpg').toLowerCase();
-    const key = `${req.user.uid}/${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
-
-    const { error: upErr } = await supabase
-      .storage
-      .from('billing')       // bucket name
-      .upload(key, req.file.buffer, {
-        contentType: req.file.mimetype || 'application/octet-stream',
-        upsert: false
-      });
-
-    if (upErr) {
-      console.error('Supabase upload error:', upErr);
-      return res.status(500).json({ error: 'upload_failed' });
-    }
-
-    // If the bucket is public, this gives a public HTTPS link:
-    const { data } = supabase.storage.from('billing').getPublicUrl(key);
-    fileUrl = data.publicUrl;
-  }
-
+  const fileUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
   const { rows } = await pool.query(
     `insert into payments (user_id, method, amount, period_days, screenshot_url, verification_status)
@@ -799,22 +814,25 @@ app.get('/db-ping', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+// ===== TEMP TEST: hit /debug-email?to=someone@example.com =====
+app.get('/debug-email', async (req, res) => {
+  try {
+    const to = (req.query.to || '').trim();
+    if (!to) return res.status(400).json({ ok: false, error: 'set ?to=email@example.com' });
+    const ok = await sendOtpEmail(to, '123456');
+    if (!ok) return res.status(500).json({ ok: false, error: 'send failed (see logs)' });
+    res.json({ ok: true, sent: to });
+  } catch (e) {
+    console.error('debug-email error', e);
+    res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
 
-// On Vercel, export the app (no listen). Locally, still listen.
-if (process.env.VERCEL) {
-  module.exports = app;
-} else {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`API on http://0.0.0.0:${PORT}`);
-  });
-}
 
 
-
-
-
-
-
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API on http://0.0.0.0:${PORT}`);
+});
 
 
 
