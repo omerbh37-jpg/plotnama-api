@@ -39,6 +39,27 @@ Multi Gardens B-17 : MG B-17, Multi Garden, MPCHS B-17, B-17
 Faisal Hills : FH, FH{block}, FH{name}, Faisal Hills Taxila`;
 
 function escRe(s: string){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+// ===== Fallback helpers (used only if the primary parser didn't set a value) =====
+
+// A: detect "123 series" or "123series" (2–4 digits) and return normalized "123 series"
+const RE_PLOT_SERIES = /\b(\d{2,4})\s*-?\s*series\b/i;
+
+// B: detect a 2–4 digit standalone number that is NOT followed/preceded by size/streets/units/series,
+//    so we can treat it as a plot number when no '#' is present.
+const RE_STANDALONE_PLOT_NUM =
+  /(?:^|\b)(\d{2,4})(?:\b(?!\s*(marla|marla\s*plot|sq|square|yd|yard|yds|feet|ft|x|by|street|st|series)))/i;
+
+// C: accept non-standard marla sizes like "15 marla", "22.5 marla", "7.75 m"
+const RE_FLEX_MARLA = /(\d{1,3}(?:\.\d+)?)\s*(marla|mrl|m)\b/i;
+
+// D: block/phase preference
+//    - Prefer "F Block" / "G Block" etc (letter before Block)
+//    - Also accept "Block C" forms
+//    - Avoid "Size Block" false positives
+const RE_BLOCK_LETTER_BEFORE = /\b([A-Z])\s*Block\b/i;     // e.g., "F Block"
+const RE_BLOCK_AFTER_WORD    = /\bBlock\s*([A-Z0-9-]+)\b/i; // e.g., "Block C", "Block B-17"
+const RE_SIZE_BLOCK_PHRASE   = /\b(?:Size\s*Block|Plot\s*Size\s*Block)\b/i;
+
 
 function formatBlock(letter: string, style: BlockOutputStyle = "title"){
   const L = String(letter||"").toUpperCase();
@@ -148,8 +169,9 @@ const sizeWordRe    = /(\d{1,3}(?:\.\d{1,2})?)\s*(kanal|marla|sq\s?ft|sq\s?yd|ga
 const sizeShortRe   = /\b(\d{1,2})\s*([mk])\b/i;
 const dimensionRe   = /(\d{2,3})\s*([x×*\/])\s*(\d{2,3})/i;
 const plotWordRe    = /plot(?:\s*#|(?:\s*no)?|num)?\s*([\d]{1,6}[A-Z]?)/i;
-const plotSeriesRe  = /\b([0-9xX]{3,6})\s*series\b/i;
+const plotSeriesRe  = /\b(\d{2,4})\s*-?\s*series\b/i;
 const streetRe      = /(?:street|st)\s*(\d{1,4})/i;
+
 
 const flags = [
   {re:/\bndc\s*(open|clear|available)\b/i, label:"NDC open"},
@@ -172,10 +194,13 @@ function extractBarePlotNumber(text: string){
   for(const m of text.matchAll(/(?:(?:demand|price|asking)\s*[:=]?\s*)?(\d{1,3}(?:[\,\.]\d{3})*(?:\.\d+)?|\d{1,4}(?:\.\d{1,2})?)\s*(cr|crore|cr\.|lac|lakh|lacs|k|m|million)?/gi)){ exclusions.push([m.index!, m.index! + m[0].length]); }
   for(const m of text.matchAll(/(?:street|st)\s*\d{1,4}/gi)){ exclusions.push([m.index!, m.index! + m[0].length]); }
   const inside = (i:number)=> exclusions.some(([s,e]) => i>=s && i<e);
-  for(const m of text.matchAll(/\b(\d{3,6})\b/g)){
-    const i = m.index ?? 0;
-    if(!inside(i)) return m[1];
-  }
+  for (const m of text.matchAll(/\b(\d{2,4})\b/g)){
+  const i = m.index ?? 0, near = text.slice(Math.max(0,i-8), i+8).toLowerCase();
+  if (inside(i)) continue;
+  if (/\b(marla|kanal|sq|yard|yds?|feet|ft|street|st|series)\b/.test(near)) continue;
+  return m[1];
+}
+
   return "";
 }
 
@@ -292,9 +317,10 @@ function parsePhaseBlock(text: string, style: BlockOutputStyle){
 
   // 1) Strongest: token to the RIGHT of "block"
   //    Examples: "Block F", "blk G", "block executive"
-  let m = t.match(/\b(?:block|blk)\s*([a-z0-9-]+)\b/i);
-  if (m){
-    const token = m[1].trim();
+  let m = t.match(/\b(?:block|blk)\s*(?!size\b)([a-z0-9-]+)\b/i);
+ if (m){
+   const token = m[1].trim();
+
     if (isSingleLetter(token)) return `Block ${token.toUpperCase()}`;
     if (/^(executive|overseas|safari|hills|extension|ext)$/i.test(token)) return cap(token);
     if (isAlphaNum(token)) return `${cap(token)} Block`;
@@ -302,9 +328,9 @@ function parsePhaseBlock(text: string, style: BlockOutputStyle){
 
   // 2) Also support token to the LEFT of "block"
   //    Examples: "F Block", "Executive Block"
-  m = t.match(/\b([a-z0-9-]+)\s*(?:block|blk)\b/i);
-  if (m){
-    const token = m[1].trim();
+  m = t.match(/\b(?!size\b)([a-z0-9-]+)\s*(?:block|blk)\b/i);
+ if (m){
+   const token = m[1].trim();
     if (isSingleLetter(token)) return `Block ${token.toUpperCase()}`;
     if (/^(executive|overseas|safari|hills|extension|ext)$/i.test(token)) return cap(token);
     if (isAlphaNum(token)) return `${cap(token)} Block`;
