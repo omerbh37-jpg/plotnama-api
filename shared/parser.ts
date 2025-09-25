@@ -165,11 +165,12 @@ function matchAliases(
 const phoneRe       = /(?:\+?92|0)3\d{2}[\s-]?\d{7}/g;
 const plotHashRe    = /(?:^|\s)#\s*([0-9]{1,6}[A-Z]?)(?=\b)/m;
 const priceRe       = new RegExp(String.raw`(?:(?:demand|price|asking)\s*[:=]?\s*)?(\d{1,3}(?:[\,\.]\d{3})*(?:\.\d+)?|\d{1,4}(?:\.\d{1,2})?)\s*(cr|crore|cr\.|lac|lakh|lacs|k|m|million)?`,"gi");
-const sizeWordRe    = /(\d{1,3}(?:\.\d{1,2})?)\s*(kanal|marla|sq\s?ft|sq\s?yd|gaz|yard|yds?|feet)/i;
+const sizeWordRe    = /(\d{1,3}(?:\.\d{1,2})?)\s*(kanal|marla|sq\.?\s?ft|sq\.?\s?yds?|sq\.?\s?yard(?:s)?|gaz|yard|yds?|feet)/i;
 const sizeShortRe   = /\b(\d{1,2})\s*([mk])\b/i;
 const dimensionRe   = /(\d{2,3})\s*([x×*\/])\s*(\d{2,3})/i;
-const plotWordRe    = /plot(?:\s*#|(?:\s*no)?|num)?\s*([\d]{1,6}[A-Z]?)/i;
-const plotSeriesRe  = /\b(\d{2,4})\s*-?\s*series\b/i;
+const plotWordRe    = /plot(?:\s*#|(?:\s*no\.?)?|num)?\s*([\d]{1,6}[A-Z]?)/i;
+const plotSeriesRe  = /\b(\d{2,5})\s*-?\s*(?:series|sereis)\b/i;
+
 const streetRe      = /(?:street|st)\s*(\d{1,4})/i;
 
 
@@ -238,7 +239,7 @@ function parsePrice(text: string){
       if (num>=1_000_000) pkr = num;
       else if (num>=0.8 && num<=10 && /cr/i.test(text)) pkr = num*10_000_000;
       else if (num>=10 && num<=500 && /(lac|lakh|lacs)/i.test(text)) pkr = num*100_000;
-      else if (num>=80 && num<=500 && /demand|asking/i.test(text)) pkr = num*100_000;
+      else if (num>=20 && num<=500 && /demand|asking|final|only/i.test(text)) pkr = num*100_000;
     }
     if(!pkr) continue;
 
@@ -272,11 +273,12 @@ function parseSize(text: string){
     return { val: "", unit: dimExact, dim: dimExact };
   }
   const s2 = text.match(sizeWordRe);
-  if (s2){
+    if (s2){
     const val = parseFloat(s2[1]);
-    const raw = s2[2].toLowerCase().replace(/\s/g,"");
+    const raw = s2[2].toLowerCase().replace(/[\s.]/g,"");
     const unitMap: Record<string, string> = {
   kanal: "Kanal",
+
   marla: "Marla",
   sqft: "SqFt",
   sqyd: "SqYd",
@@ -317,7 +319,7 @@ function parsePhaseBlock(text: string, style: BlockOutputStyle){
 
   // 1) Strongest: token to the RIGHT of "block"
   //    Examples: "Block F", "blk G", "block executive"
-  let m = t.match(/\b(?:block|blk)\s*(?!size\b)([a-z0-9-]+)\b/i);
+ let m = t.match(/\b(?:block|blk)\s*(?!size\b)([a-z0-9-]+)\b/i);
  if (m){
    const token = m[1].trim();
 
