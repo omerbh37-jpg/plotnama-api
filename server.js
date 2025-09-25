@@ -642,14 +642,16 @@ app.get('/listings', async (req, res) => {
 
     // Public (unauthenticated) feed
     const { rows } = await pool.query(
-      `select id, society_name, phase_block, plot_size_value, plot_size_unit,
-       plot_number, demand_amount_pkr, phone_e164 as phone, notes, attributes
+  `select id, society_name, phase_block, plot_size_value, plot_size_unit,
+          plot_number, demand_amount_pkr,
+          (attributes->>'phone') as phone,
+          notes, attributes
+     from listings
+    order by created_at desc
+    limit $1`,
+  [limit]
+);
 
-         from listings
-        order by created_at desc
-        limit $1`,
-      [limit]
-    );
     res.json(rows);
   } catch (e) {
     console.error('GET /listings failed:', e);
@@ -674,14 +676,17 @@ const {
   attributes
 } = req.body || {};
 
-// INSERT into the correct column name in your table: phone_e164
-console.log('POST /listings about to insert with phone_e164 =', phone || null);
+// Merge phone into attributes JSONB (no dedicated phone column in this DB)
+const mergedAttributes =
+  attributes && typeof attributes === 'object'
+    ? { ...attributes, phone: phone || null }
+    : (phone ? { phone } : null);
 
 const { rows } = await pool.query(
   `insert into listings
      (user_id, society_name, phase_block, plot_size_value, plot_size_unit,
-      plot_number, demand_amount_pkr, phone_e164, notes, attributes)
-   values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      plot_number, demand_amount_pkr, notes, attributes)
+   values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
    returning id`,
   [
     uid,
@@ -691,11 +696,11 @@ const { rows } = await pool.query(
     plot_size_unit || 'Marla',
     plot_number || null,
     demand_amount_pkr ?? null,
-    (phone || null),   // map to phone_e164 column
     notes || null,
-    attributes || null
+    mergedAttributes
   ]
 );
+
 
 
 
