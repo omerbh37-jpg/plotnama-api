@@ -695,7 +695,8 @@ app.post('/listings', requireAuth, readOnlyMiddleware(), express.json(), async (
     res.status(201).json({ id: rows[0].id });
   } catch (e) {
     console.error('POST /listings error', e);
-    res.status(500).json({ error: 'server_error' });
+    res.status(500).json({ error: e?.message || 'server_error', detail: e?.detail || e?.code || null });
+
   }
 });
 
