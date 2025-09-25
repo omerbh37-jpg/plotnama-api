@@ -675,6 +675,8 @@ const {
 } = req.body || {};
 
 // INSERT into the correct column name in your table: phone_e164
+console.log('POST /listings about to insert with phone_e164 =', phone || null);
+
 const { rows } = await pool.query(
   `insert into listings
      (user_id, society_name, phase_block, plot_size_value, plot_size_unit,
@@ -694,6 +696,7 @@ const { rows } = await pool.query(
     attributes || null
   ]
 );
+
 
 
     res.status(201).json({ id: rows[0].id });
@@ -948,6 +951,21 @@ app.get('/db-ping', async (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
+// Debug: list columns of public.listings so we know what this DB expects
+app.get('/debug/listings/columns', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      select column_name
+        from information_schema.columns
+       where table_schema='public' and table_name='listings'
+       order by ordinal_position
+    `);
+    res.json(r.rows.map(x => x.column_name));
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 // ===== TEMP TEST: hit /debug-email?to=someone@example.com =====
 app.get('/debug-email', async (req, res) => {
   try {
