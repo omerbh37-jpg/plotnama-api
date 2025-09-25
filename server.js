@@ -1,12 +1,14 @@
+
 require('dotenv').config();
 
-const express = require('express');
-const app = express();
 
+const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const { parse } = require('pg-connection-string');
 const bcrypt = require('bcryptjs');
+
+
 
 const raw = process.env.PG_CONNECTION_STRING || process.env.DATABASE_URL;
 if (!raw) throw new Error('PG_CONNECTION_STRING (or DATABASE_URL) is not set');
@@ -18,37 +20,71 @@ const pool = new Pool({
 });
 
 
+
+
+
+
+
 const crypto = require('crypto');
 
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-// === Email (Resend) ===
-// === Email (Resend) ===
+// === Email (SMTP first, then Resend fallback) ===
+const nodemailer = require('nodemailer');
 const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY || '');
+
+
+
+const smtpTransport = process.env.SMTP_HOST
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT || 587) === 465, // SSL for 465
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
+    })
+  : null;
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+async function sendEmailPlain(to, subject, text, from = (process.env.EMAIL_FROM || 'PlotNama <no-reply@plotnama.com>')) {
+  // 1) Try SMTP
+  if (smtpTransport) {
+    try {
+      await smtpTransport.sendMail({ from, to, subject, text });
+      console.log('SMTP email sent');
+      return true;
+    } catch (err) {
+      console.error('SMTP error:', err?.message || err);
+    }
+  }
+  // 2) Fallback to Resend (if configured)
+  if (resend) {
+    try {
+      const r = await resend.emails.send({ from, to, subject, text });
+      console.log('Resend ok:', r?.id || r);
+      return true;
+    } catch (err) {
+      console.error('Resend send error:', err?.message || err);
+    }
+  }
+  // 3) Nothing worked
+  console.warn('No email provider configured; dev fallback will return values to client');
+  return false;
+}
 
 async function sendOtpEmail(to, code) {
-  try {
-    if (!process.env.RESEND_API_KEY) {
-      console.warn('RESEND_API_KEY missing => skipping email (DEV fallback will return OTP)');
-      return false; // tell caller to fallback
-    }
-    const from = process.env.EMAIL_FROM || 'PlotNama <no-reply@plotnama.com>';
-    const r = await resend.emails.send({
-      from,
-      to,
-      subject: 'Your PlotNama OTP',
-      text: `Your PlotNama code is: ${code}\n\nIt expires in 10 minutes.`,
-    });
-    console.log('Resend ok:', r?.id || r); // helpful for logs
-    return true;
-  } catch (err) {
-    console.error('Resend send error:', err?.message || err);
-    return false; // let caller fallback or show message
-  }
+  const subject = 'Your PlotNama OTP';
+  const text = `Your PlotNama code is: ${code}\n\nIt expires in 10 minutes.`;
+  return sendEmailPlain(to, subject, text);
 }
+
+
+const app = express();
+app.set('trust proxy', 1);
 
 // CORS (Express 5 friendly)
 app.use(cors({
@@ -74,10 +110,14 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// static serving for uploaded screenshots
 const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+try {
+  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+} catch (_) {
+  // likely read-only FS (serverless) – just skip creating the folder
+}
 app.use('/uploads', express.static(path.join(__dirname, UPLOAD_DIR)));
+
 console.log('PG_CONNECTION_STRING =', process.env.PG_CONNECTION_STRING || '(missing)');
 
 
@@ -216,6 +256,10 @@ async function getSubscriptionStatus(userId) {
   );
  
 
+
+
+
+
   if (rows.length) {
     const end = new Date(rows[0].end_at);
     const daysLeft = Math.ceil((end - new Date()) / (1000*60*60*24));
@@ -242,6 +286,11 @@ function readOnlyMiddleware() {
     next();
   };
 }
+// ---- OTP helper (one place) ----
+function randomOtp() {
+  // 6-digit string, e.g. "482913"
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
 
 /* ============ AUTH (prototype OTP) ============ */
 
@@ -263,15 +312,14 @@ app.post('/auth/signup', async (req, res) => {
   );
 
   // issue OTP (6-digit, 10 min)
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+const code = randomOtp();
+await pool.query(
+  `insert into otps (email, code, expires_at)
+   values ($1, $2, NOW() + INTERVAL '10 minutes')
+   on conflict (email) do update set code = EXCLUDED.code, expires_at = EXCLUDED.expires_at`,
+  [email, code]
+);
 
-  await pool.query(
-    `insert into otps (email, code, expires_at)
-     values ($1,$2,$3)
-     on conflict (email) do update set code=$2, expires_at=$3`,
-    [email, code, expiresAt.toISOString()]
-  );
 
   // try to email; if no RESEND key, fall back to dev behavior
   const emailed = await sendOtpEmail(email, code);
@@ -328,6 +376,8 @@ const replace     = String(req.header('x-replace-device') || '') === '1';
     }
     throw e;
   }
+  // Invalidate OTP after successful use
+  await pool.query('delete from otps where email=$1', [email]);
 
   // Issue token bound to this device
   const token = sign(user, device_id);
@@ -403,8 +453,13 @@ app.post('/auth/login', async (req, res) => {
     [email, code, expiresAt.toISOString()]
   );
 
-  res.json({ ok: true, next: 'otp', otp_for_testing: code });
+  // try to email; if Resend isn’t set up, keep dev fallback
+  const emailed = await sendOtpEmail(email, code);
+  if (!emailed) return res.json({ ok: true, next: 'otp', otp_for_testing: code });
+
+  return res.json({ ok: true, next: 'otp', message: 'OTP sent' });
 });
+
 
 /**
  * POST /auth/forgot { email }
@@ -415,18 +470,32 @@ app.post('/auth/forgot', async (req, res) => {
   if (!email) return res.status(400).json({ error: 'email_required' });
 
   const { rows } = await pool.query('select id from app_users where email=$1', [email]);
-  if (!rows.length) return res.json({ ok: true }); // do not leak accounts
-  const userId = rows[0].id;
+  if (!rows.length) return res.json({ ok: true }); // do not leak
 
+  const userId = rows[0].id;
   const token = crypto.randomBytes(24).toString('hex');
   const expiresAt = new Date(Date.now() + 60*60*1000); // 1 hour
+
   await pool.query(
     `insert into password_resets (user_id, token, expires_at) values ($1,$2,$3)`,
     [userId, token, expiresAt.toISOString()]
   );
 
-  res.json({ ok: true, reset_token_for_testing: token });
+    const emailed = await sendEmailPlain(
+    email,
+    'Reset your PlotNama password',
+    `Use this code to reset your password: ${token}\n\nValid for 1 hour.`
+  );
+
+  if (emailed) {
+    return res.json({ ok: true, message: 'If that email exists, a reset message was sent.' });
+  } else {
+    // DEV fallback: return token in response so you can test without email
+    return res.json({ ok: true, reset_token_for_testing: token });
+  }
+
 });
+
 
 /**
  * POST /auth/reset { token, password, confirm }
@@ -784,7 +853,7 @@ const PORT = process.env.PORT || 8080;
 // simple homepage
 app.get('/', (req, res) => {
   res.type('text').send(
-    'DealerBook API is running (v-0922a).\n\n' +  // <-- add a tag
+    'DealerBook API is running.\n\n' +
     'POST /auth/signup  { email }\n' +
     'POST /auth/verify  { email, code }\n' +
     'GET  /me           (Authorization: Bearer <token>)\n' +
@@ -794,7 +863,6 @@ app.get('/', (req, res) => {
     'GET  /db-ping'
   );
 });
-
 
 // DB ping route (checks connection to Supabase)
 app.get('/db-ping', async (req, res) => {
@@ -810,7 +878,8 @@ app.get('/debug-email', async (req, res) => {
   try {
     const to = (req.query.to || '').trim();
     if (!to) return res.status(400).json({ ok: false, error: 'set ?to=email@example.com' });
-    const ok = await sendOtpEmail(to, '123456');
+    const ok = await sendOtpEmail(to, randomOtp());
+
     if (!ok) return res.status(500).json({ ok: false, error: 'send failed (see logs)' });
     res.json({ ok: true, sent: to });
   } catch (e) {
@@ -821,9 +890,12 @@ app.get('/debug-email', async (req, res) => {
 
 
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`API on http://0.0.0.0:${PORT}`);
-});
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`API on http://0.0.0.0:${PORT}`);
+  });
+}
+module.exports = app;
 
 
 
