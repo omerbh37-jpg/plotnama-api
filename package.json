@@ -13,27 +13,11 @@
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-<<<<<<< HEAD
     "resend": "^4.0.0",
-=======
->>>>>>> b9a8977 (OTP: per-email generator + upsert; SMTP working; Vercel adapter)
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.2",
-<<<<<<< HEAD
-    "pg": "^8.16.3",
-    "pg-connection-string": "^2.6.2",
-    "postgres": "^3.4.7",
-    "@supabase/supabase-js": "^2.45.0",
-    "serverless-http": "^3.2.0"
+    "multer": "^2.0.2"
 
-=======
-    "nodemailer": "^7.0.6",
-    "pg": "^8.16.3",
-    "pg-connection-string": "^2.6.2",
-    "postgres": "^3.4.7",
-    "resend": "^6.1.0"
->>>>>>> b9a8977 (OTP: per-email generator + upsert; SMTP working; Vercel adapter)
   }
 }
