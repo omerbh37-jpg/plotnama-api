@@ -642,7 +642,9 @@ app.get('/listings', async (req, res) => {
 
     // Public (unauthenticated) feed
     const { rows } = await pool.query(
-      `select id, society_name, phase_block, plot_size_value, plot_size_unit, plot_number, demand_amount_pkr
+      `select id, society_name, phase_block, plot_size_value, plot_size_unit,
+       plot_number, demand_amount_pkr, phone_e164 as phone, notes, attributes
+
          from listings
         order by created_at desc
         limit $1`,
@@ -660,37 +662,39 @@ app.get('/listings', async (req, res) => {
 app.post('/listings', requireAuth, readOnlyMiddleware(), express.json(), async (req, res) => {
   try {
     const uid = req.user.uid; // set by requireAuth
-    const {
-      society_name,
-      phase_block,
-      plot_size_value,
-      plot_size_unit,
-      plot_number,
-      demand_amount_pkr,
-      phone,
-      notes,
-      attributes
-    } = req.body || {};
+const {
+  society_name,
+  phase_block,
+  plot_size_value,
+  plot_size_unit,
+  plot_number,
+  demand_amount_pkr,
+  phone,        // client sends "phone"
+  notes,
+  attributes
+} = req.body || {};
 
-    const { rows } = await pool.query(
-      `insert into listings
-         (user_id, society_name, phase_block, plot_size_value, plot_size_unit,
-          plot_number, demand_amount_pkr, phone, notes, attributes)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       returning id`,
-      [
-        uid,
-        society_name || null,
-        phase_block || null,
-        plot_size_value ?? null,
-        plot_size_unit || 'Marla',
-        plot_number || null,
-        demand_amount_pkr ?? null,
-        phone || null,
-        notes || null,
-        attributes || null
-      ]
-    );
+// INSERT into the correct column name in your table: phone_e164
+const { rows } = await pool.query(
+  `insert into listings
+     (user_id, society_name, phase_block, plot_size_value, plot_size_unit,
+      plot_number, demand_amount_pkr, phone_e164, notes, attributes)
+   values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+   returning id`,
+  [
+    uid,
+    society_name || null,
+    phase_block || null,
+    plot_size_value ?? null,
+    plot_size_unit || 'Marla',
+    plot_number || null,
+    demand_amount_pkr ?? null,
+    (phone || null),   // map to phone_e164 column
+    notes || null,
+    attributes || null
+  ]
+);
+
 
     res.status(201).json({ id: rows[0].id });
   } catch (e) {
