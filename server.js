@@ -621,7 +621,7 @@ app.get('/listings', async (req, res) => {
       if (soc)   { params.push(soc);   where += ` and society_name=$${params.length}`; }
       if (blk)   { params.push(blk);   where += ` and phase_block=$${params.length}`; }
       if (unit)  { params.push(unit);  where += ` and plot_size_unit=$${params.length}`; }
-      if (nature){ params.push(nature);where += ` and coalesce(extras->>'land_nature','')=$${params.length}`; }
+      if (nature){ params.push(nature);where += ` and coalesce(attributes->>'land_nature','')=$${params.length}`; }
       if (min)   { params.push(Number(min)); where += ` and coalesce(demand_amount_pkr,0) >= $${params.length}`; }
       if (max)   { params.push(Number(max)); where += ` and coalesce(demand_amount_pkr,0) <= $${params.length}`; }
       if (q) {
@@ -654,6 +654,52 @@ app.get('/listings', async (req, res) => {
     res.status(500).json({ error: 'server_error' });
   }
 });
+
+
+// Create a listing (user-scoped)
+app.post('/listings', requireAuth, readOnlyMiddleware(), express.json(), async (req, res) => {
+  try {
+    const uid = req.user.uid; // set by requireAuth
+    const {
+      society_name,
+      phase_block,
+      plot_size_value,
+      plot_size_unit,
+      plot_number,
+      demand_amount_pkr,
+      phone,
+      notes,
+      attributes
+    } = req.body || {};
+
+    const { rows } = await pool.query(
+      `insert into listings
+         (user_id, society_name, phase_block, plot_size_value, plot_size_unit,
+          plot_number, demand_amount_pkr, phone, notes, attributes)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       returning id`,
+      [
+        uid,
+        society_name || null,
+        phase_block || null,
+        plot_size_value ?? null,
+        plot_size_unit || 'Marla',
+        plot_number || null,
+        demand_amount_pkr ?? null,
+        phone || null,
+        notes || null,
+        attributes || null
+      ]
+    );
+
+    res.status(201).json({ id: rows[0].id });
+  } catch (e) {
+    console.error('POST /listings error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+
 
 
 /* ============ PAYMENTS (screenshot upload) ============ */
