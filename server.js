@@ -110,13 +110,24 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
+// Writable uploads dir: use /tmp on Vercel serverless, local folder otherwise
+const UPLOAD_DIR =
+  process.env.VERCEL === '1'
+    ? '/tmp/uploads'
+    : path.join(__dirname, process.env.UPLOAD_DIR || 'uploads');
+
 try {
-  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
-} catch (_) {
-  // likely read-only FS (serverless) – just skip creating the folder
+  // Will succeed locally; on Vercel we create /tmp/uploads (writable)
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+} catch (e) {
+  console.warn('UPLOAD_DIR create skipped:', e.code || e.message);
 }
-app.use('/uploads', express.static(path.join(__dirname, UPLOAD_DIR)));
+
+// Only expose a static /uploads route when running NOT on Vercel
+if (process.env.VERCEL !== '1') {
+  app.use('/uploads', express.static(UPLOAD_DIR));
+}
+
 
 console.log('PG_CONNECTION_STRING =', process.env.PG_CONNECTION_STRING || '(missing)');
 
@@ -647,10 +658,23 @@ app.get('/listings', async (req, res) => {
 
 /* ============ PAYMENTS (screenshot upload) ============ */
 
-const upload = multer({ dest: UPLOAD_DIR });
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file?.originalname || '');
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  },
+});
+const upload = multer({ storage });
+
 app.post('/payments', requireAuth, upload.single('screenshot'), async (req, res) => {
   const { method, amount, period_days } = req.body || {};
-  const fileUrl = req.file ? `/uploads/${req.file.filename}` : null;
+  const fileUrl = req.file
+  ? (process.env.VERCEL === '1'
+      ? null                                 // stored in /tmp, not publicly served
+      : `/uploads/${req.file.filename}`)     // local/dev: served statically
+  : null;
+
 
   const { rows } = await pool.query(
     `insert into payments (user_id, method, amount, period_days, screenshot_url, verification_status)
