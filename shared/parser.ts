@@ -28,15 +28,16 @@ export const DEFAULT_ALIASES = {
 
   "Bahria Town Rawalpindi": { "Phase 7": ["BHT 7", "BT P7", "Bahria P7", "Bahria Town Phase 7"] },
   "Faisal Hills": { "Executive": ["FH Executive", "FH Executive Block", "Executive Block"] },
-  "Multi Gardens B-17": { "Block F": ["B17 F", "Multi Garden F", "B-17 F"] }
+  "Multi Gardens B-17": { "Block X": ["B17 X", "Multi Garden X", "B-17 X"] }
 };
 
 export const DEFAULT_SOC_DICT = `Bahria Town Karachi : BTK, Bahria Karachi, BT Karachi
 DHA Lahore : DHA LHR, Defence Lahore
 Bahria Town Rawalpindi : BTR, Bahria Pindi, Bahria Rwp
 Gulberg Islamabad : GI, Gulberg Isb
-Multi Gardens B-17 : MG B-17, Multi Garden, MPCHS B-17, B-17
+Multi Gardens B-17 : MG B-17, Multi Garden, MPCHS B-17, B-17, B17, MPCHS, B/17, B.17
 Faisal Hills : FH, FH{block}, FH{name}, Faisal Hills Taxila`;
+
 
 function escRe(s: string){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 // ===== Fallback helpers (used only if the primary parser didn't set a value) =====
@@ -111,14 +112,16 @@ function findSocietyFromDict(text: string, csv: string){
 
       if (/\{block\}/i.test(alias)){
         const base = alias.replace(/\{block\}/i, "");
-        const rx = new RegExp(`\\b${escRe(base)}([A-Z])\\b`, "i");
+        const rx = new RegExp(`\\b${escRe(base)}\\s*([A-Z])\\b`, "i");
         const m = rx.exec(t);
         if (m) return { society: canonical, block: m[1].toUpperCase() };
+
         continue;
       }
       if (/\{name\}/i.test(alias)){
         const base = alias.replace(/\{name\}/i, "");
-        const rx = new RegExp(`\\b${escRe(base)}\\s+([A-Za-z]+)\\b`, "i");
+        const rx = new RegExp(`\\b${escRe(base)}\\s*([A-Z])\\b`, "i");
+
         const m = rx.exec(t);
         if (m) return { society: canonical, block: m[1] };
         continue;
@@ -163,13 +166,20 @@ function matchAliases(
 
 // ===== Regex library =====
 const phoneRe       = /(?:\+?92|0)3\d{2}[\s-]?\d{7}/g;
-const plotHashRe    = /(?:^|\s)#\s*([0-9]{1,6}[A-Z]?)(?=\b)/m;
+
 const priceRe       = new RegExp(String.raw`(?:(?:demand|price|asking)\s*[:=]?\s*)?(\d{1,3}(?:[\,\.]\d{3})*(?:\.\d+)?|\d{1,4}(?:\.\d{1,2})?)\s*(cr|crore|cr\.|lac|lakh|lacs|k|m|million)?`,"gi");
-const sizeWordRe    = /(\d{1,3}(?:\.\d{1,2})?)\s*(kanal|marla|sq\.?\s?ft|sq\.?\s?yds?|sq\.?\s?yard(?:s)?|gaz|yard|yds?|feet)/i;
+const sizeWordRe    = /\(?\s*(\d{1,3}(?:\.\d{1,2})?)\s*\)?\s*(kanal|marla|sq\.?\s?ft|sq\.?\s?yds?|sq\.?\s?yard(?:s)?|gaz|yard|yds?|feet)\b/i;
 const sizeShortRe   = /\b(\d{1,2})\s*([mk])\b/i;
 const dimensionRe   = /(\d{2,3})\s*([x×*\/])\s*(\d{2,3})/i;
+
 const plotWordRe    = /plot(?:\s*#|(?:\s*no\.?)?|num)?\s*([\d]{1,6}[A-Z]?)/i;
 const plotSeriesRe  = /\b(\d{2,5})\s*-?\s*(?:series|sereis)\b/i;
+
+const plotHashRe    = /(?:^|\s)#\s*([0-9]{1,6}[A-Z]?)(?=\b)/mi;
+
+
+
+
 
 const streetRe      = /(?:street|st)\s*(\d{1,4})/i;
 
@@ -181,115 +191,155 @@ const flags = [
   {re:/\bcorner\b/i, label:"Corner"},
   {re:/\bpark[-\s]?facing\b/i, label:"Park facing"},
   {re:/\bboulevard|\bmain\s+boulevard|\bon\s+boulevard\b/i, label:"Boulevard"},
-  {re:/\bnear\s+commercial|\bnear\s+markaz|\bback\s+open\b/i, label:"Near commercial/markaz/back open"}
+  {re:/\bnear\s+commercial|\bnear\s+markaz|\bback\s+open\b/i, label:"Near commercial/markaz/back open"}, {re:/\b2nd\s+to\s+corner\b/i, label:"2nd to corner"}, {re:/\b2nd\s+to\s+mdr\b/i, label:"2nd to MDR"}
 ];
 
 const DIM_TO_MARLA: Record<string, number> = {"25x50":5,"30x60":7,"35x70":10,"50x90":20,"100x90":40};
 
-function extractBarePlotNumber(text: string){
-  const exclusions: Array<[number, number]> = [];
-  for(const m of text.matchAll(/(?:\+?92|0)3\d{2}[\s-]?\d{7}/g)){ exclusions.push([m.index!, m.index! + m[0].length]); }
-  for(const m of text.matchAll(/(\d{2,3})\s*[x×*\/]\s*(\d{2,3})/gi)){ exclusions.push([m.index!, m.index! + m[0].length]); }
-  for(const m of text.matchAll(/plot(?:\s*#|(?:\s*no)?|num)?\s*([\d]{1,6}[A-Z]?)/gi)){ exclusions.push([m.index!, m.index! + m[0].length]); }
-  for(const m of text.matchAll(/(?:^|\s)#\s*([0-9]{1,6}[A-Z]?)(?=\b)/gm)){ exclusions.push([m.index!, m.index! + m[0].length]); }
-  for(const m of text.matchAll(/(?:(?:demand|price|asking)\s*[:=]?\s*)?(\d{1,3}(?:[\,\.]\d{3})*(?:\.\d+)?|\d{1,4}(?:\.\d{1,2})?)\s*(cr|crore|cr\.|lac|lakh|lacs|k|m|million)?/gi)){ exclusions.push([m.index!, m.index! + m[0].length]); }
-  for(const m of text.matchAll(/(?:street|st)\s*\d{1,4}/gi)){ exclusions.push([m.index!, m.index! + m[0].length]); }
-  const inside = (i:number)=> exclusions.some(([s,e]) => i>=s && i<e);
-  for (const m of text.matchAll(/\b(\d{2,4})\b/g)){
-  const i = m.index ?? 0, near = text.slice(Math.max(0,i-8), i+8).toLowerCase();
-  if (inside(i)) continue;
-  if (/\b(marla|kanal|sq|yard|yds?|feet|ft|street|st|series)\b/.test(near)) continue;
-  return m[1];
-}
 
-  return "";
+
+// --- Bare plot fallback: first 2–4 digits with optional suffix letter (A–Z),
+// excluding phones, dimensions, explicit plot contexts, price spans, and streets.
+function extractBarePlotNumber(text: string){
+  const exclusions: Array<[number,number]> = [];
+
+  // phones
+  for (const m of text.matchAll(/(?:\+?92|0)3\d{2}[\s-]?\d{7}/g)){
+    exclusions.push([m.index!, m.index! + m[0].length]);
+  }
+  // dimensions like 50x90 / 25/50
+  for (const m of text.matchAll(/(\d{2,3})\s*[x×*\/]\s*(\d{2,3})/gi)){
+    exclusions.push([m.index!, m.index! + m[0].length]);
+  }
+  // explicit plot contexts (word + number)
+  for (const m of text.matchAll(/plot(?:\s*#|(?:\s*no\.?)?|num)?\s*([\d]{1,6}[A-Z]?)/gi)){
+    exclusions.push([m.index!, m.index! + m[0].length]);
+  }
+  // bare hash contexts (# 2783 / #2783)
+  for (const m of text.matchAll(/(?:^|\s)#\s*([0-9]{1,6}[A-Z]?)(?=\b)/gm)){
+    exclusions.push([m.index!, m.index! + m[0].length]);
+  }
+  // price spans (numbers with units/cues)
+  for (const m of text.matchAll(/(?:(?:demand|price|asking)\s*[:=]?\s*)?(\d{1,3}(?:[\,\.]\d{3})*(?:\.\d+)?|\d{1,4}(?:\.\d{1,2})?)\s*(cr|crore|cr\.|lac|lakh|lacs|k|m|million)?/gi)){
+    exclusions.push([m.index!, m.index! + m[0].length]);
+  }
+  // streets
+  for (const m of text.matchAll(/(?:street|st)\s*\d{1,4}/gi)){
+    exclusions.push([m.index!, m.index! + m[0].length]);
+  }
+
+  const inside = (i:number)=> exclusions.some(([s,e])=> i>=s && i<e);
+
+  // pick the first clean 2–4 digits optionally followed by one letter
+  for (const m of text.matchAll(/\b(\d{2,4}[A-Z]?)\b/gi)){
+    const i = m.index ?? 0;
+    const near = text.slice(Math.max(0,i-10), i+10).toLowerCase();
+    if (inside(i)) continue;
+    if (/\b(marla|kanal|sq|yard|yds?|feet|ft|street|st|series)\b/.test(near)) continue;
+    return m[1].toUpperCase();
+  }
+  return '';
 }
 
 // ===== Price / Size / Block =====
 function parsePrice(text: string){
-  const matches = [...text.matchAll(priceRe)];
-  if (!matches.length) return {amount:"", text:""};
+  const t = text;
+  const matches = [...t.matchAll(priceRe)];
+  if (!matches.length) return { amount: "", text: "" };
 
-  const tLower = text.toLowerCase();
-  const demandIdx = tLower.indexOf("demand");
-  const priceIdx  = tLower.indexOf("price");
+  // Treat numbers inside/near plot contexts as NOT price:
+  // - "Plot # 2783", "Plot no 2783", "# 2783", "200 series/sereis"
+  const inPlotContext = (idx: number) => {
+    const window = t.slice(Math.max(0, idx - 12), idx + 12).toLowerCase();
+    if (/(?:^|\s)#\s*\d{1,6}[a-z]?\b/.test(window)) return true;
+    if (/plot(?:\s*#|(?:\s*no\.?)?|num)?\s*\d{1,6}[a-z]?\b/.test(window)) return true;
+    if (/\b\d{2,5}\s*-?\s*(?:series|sereis)\b/.test(window)) return true;
+    return false;
+  };
 
-  const plotCtxRe = /plot\s*(?:#|no|num)?\s*\d{1,6}/ig;
-  function isNearPlot(i:number){
-    let m; while ((m = plotCtxRe.exec(text)) !== null) {
-      const start = m.index!, end = start + m[0].length;
-      if ((i >= start && i <= end) || (i > end && i - end <= 8)) return true;
-    } return false;
-  }
+  // We only allow price if there is a unit OR a nearby cue word.
+  const cuesRe = /\b(demand|asking|final|only)\b/i;
 
-  const cands: Array<{pkr:number, raw:string, score:number}> = [];
-  for(const m of matches){
-    const rawNum = m[1]; if(!rawNum) continue;
-    const unit = (m[2]||"").toLowerCase();
-    const num = parseFloat(rawNum.replace(/,/g,""));
-    const idx = m.index ?? text.indexOf(m[0]);
-    if (isNearPlot(idx)) continue;
 
+  const cands: { pkr: number; raw: string; score: number }[] = [];
+
+  for (const m of matches) {
+    const raw = m[0];
+    const numStr = m[1];
+    const unit = (m[2] || "").toLowerCase();
+    const idx = m.index ?? t.indexOf(raw);
+    if (!numStr) continue;
+    if (inPlotContext(idx)) continue;
+
+    const num = parseFloat(numStr.replace(/,/g, ""));
     let pkr: number | undefined;
-    if (["cr","cr.","crore"].includes(unit)) pkr = num * 10_000_000;
-    else if (["lac","lakh","lacs"].includes(unit)) pkr = num * 100_000;
+
+    // Units → direct conversion
+    if (unit === "cr" || unit === "cr." || unit === "crore") pkr = num * 10_000_000;
+    else if (unit === "lac" || unit === "lakh" || unit === "lacs") pkr = num * 100_000;
     else if (unit === "k") pkr = num * 1_000;
     else if (unit === "m" || unit === "million") pkr = num * 1_000_000;
     else {
-      if (num>=1_000_000) pkr = num;
-      else if (num>=0.8 && num<=10 && /cr/i.test(text)) pkr = num*10_000_000;
-      else if (num>=10 && num<=500 && /(lac|lakh|lacs)/i.test(text)) pkr = num*100_000;
-      else if (num>=20 && num<=500 && /demand|asking|final|only/i.test(text)) pkr = num*100_000;
+      // No explicit unit: only accept if a cue word is nearby and value looks like "lacs"
+      const around = t.slice(Math.max(0, idx - 20), idx + 20).toLowerCase();
+      const hasCue = cuesRe.test(around);
+      if (hasCue && num >= 20 && num <= 500) pkr = num * 100_000;
     }
-    if(!pkr) continue;
 
+    // No unit and no cues → skip (prevents phantom 5,000,000)
+    if (!pkr) continue;
+
+    // Light scoring to choose best candidate if multiple appear
     let score = 0;
-    if(unit) score += 3;
-    if(demandIdx !== -1) score += Math.max(0, 2 - Math.abs(idx - demandIdx)/50);
-    if(priceIdx  !== -1) score += Math.max(0, 1 - Math.abs(idx - priceIdx)/50);
-    if(!unit && String(num).length >= 4) score -= 0.5;
+    if (unit) score += 2;
+    if (/\bdemand\b/i.test(t)) score += Math.max(0, 2 - Math.abs(idx - t.toLowerCase().indexOf("demand")) / 50);
+    if (/\bprice\b/i.test(t)) score += 1;
 
-    cands.push({pkr: Math.round(pkr), raw:m[0], score});
+    cands.push({ pkr: Math.round(pkr), raw, score });
   }
-  if(!cands.length) return {amount:"", text:""};
-  cands.sort((a,b)=> (b.score - a.score) || (b.pkr - a.pkr));
-  return {amount: cands[0].pkr, text: cands[0].raw};
+
+  if (!cands.length) return { amount: "", text: "" };
+  cands.sort((a, b) => b.score - a.score || b.pkr - a.pkr);
+  return { amount: cands[0].pkr, text: cands[0].raw };
 }
 
+
 function parseSize(text: string){
+  // short forms first: 5M => 5 Marla, 1K => 1 Kanal
+const sShort = text.match(/\b(\d{1,2})\s*([mk])\b/i);
+if (sShort){
+  const n = parseFloat(sShort[1]);
+  const u = sShort[2].toLowerCase();
+  return { val: n, unit: (u === 'k' ? 'Kanal' : 'Marla'), dim: '' };
+}
+
   const s1 = text.match(sizeShortRe);
   if (s1){
     const n = parseFloat(s1[1]); const u = s1[2].toLowerCase();
     return {val: n, unit: (u==="k"?"Kanal":"Marla"), dim:""};
   }
-  const d = text.match(dimensionRe);
-  if (d){
-    const w = d[1], sep = d[2], h = d[3];
-    const dimExact = `${w}${sep}${h}`;
-    const dimKey   = `${w}x${h}`.toLowerCase();
-    if (DIM_TO_MARLA[dimKey] !== undefined) {
-      return { val: DIM_TO_MARLA[dimKey], unit: "Marla", dim: dimExact };
-    }
-    return { val: "", unit: dimExact, dim: dimExact };
-  }
-  const s2 = text.match(sizeWordRe);
-    if (s2){
-    const val = parseFloat(s2[1]);
-    const raw = s2[2].toLowerCase().replace(/[\s.]/g,"");
-    const unitMap: Record<string, string> = {
-  kanal: "Kanal",
+  
+const d = text.match(dimensionRe);
+if (d){
+  const w = parseInt(d[1],10), h = parseInt(d[3],10), dimExact = d[0].replace(/\s+/g,''), dimKey = `${w}x${h}`.toLowerCase();
+  if (DIM_TO_MARLA[dimKey] !== undefined) return { val: DIM_TO_MARLA[dimKey], unit: 'Marla', dim: dimExact };
+  return { val: '', unit: dimExact, dim: dimExact };
+}
 
-  marla: "Marla",
+
+  const s2 = text.match(sizeWordRe) || text.match(/\b(\d{1,3}(?:\.\d+)?)\s*marla\b/i);
+if (s2){
+  const val = parseFloat(s2[1]);
+  const raw = (s2[2] ?? 'marla').toLowerCase().replace(/[\s.]/g,'');
+  const unitMap: Record<string, string> = {
+  kanal: "Kanal", marla: "Marla",
   sqft: "SqFt",
-  sqyd: "SqYd",
-  sqyard: "SqYd",
-  yard: "SqYd",
-  yds: "SqYd",
-  gaz: "SqYd",
-  feet: "SqFt",
+  sqyd: "SqYd", sqyard: "SqYd", yard: "SqYd", yds: "SqYd", gaz: "SqYd", feet: "SqFt"
 };
 
-  }
+  return { val, unit: unitMap[raw] || (s2[2] || '').trim(), dim: '' };
+}
+
   return {val:"", unit:"", dim:""};
 }
 
@@ -319,10 +369,9 @@ function parsePhaseBlock(text: string, style: BlockOutputStyle){
 
   // 1) Strongest: token to the RIGHT of "block"
   //    Examples: "Block F", "blk G", "block executive"
- let m = t.match(/\b(?:block|blk)\s*(?!size\b)([a-z0-9-]+)\b/i);
+let m = t.match(/\b(?:block|blk)\s*(?!size\b)(?!\d{2,3}\s*[x×*\/]\s*\d{2,3}\b)([a-z0-9-]+)\b/i);
  if (m){
    const token = m[1].trim();
-
     if (isSingleLetter(token)) return `Block ${token.toUpperCase()}`;
     if (/^(executive|overseas|safari|hills|extension|ext)$/i.test(token)) return cap(token);
     if (isAlphaNum(token)) return `${cap(token)} Block`;
@@ -417,10 +466,12 @@ export function parseMessage(text: string, opts: ParseOptions = {}): ParsedResul
     phone_e164: phones[0] ? toE164(phones[0]) : "",
     notes: Array.from(new Set(notesBits)).join(", "),
     flags: {
-      corner: /\bcorner\b/i.test(lower),
+            corner: /\bcorner\b/i.test(lower),
       park: /park[-\s]?facing/i.test(lower),
-      possession: /\bpossession\b/i.test(lower)
+            possession: /\bpossession\b/i.test(lower)
     },
-    dimensions: size.dim || ""
-  };
+    dimensions: size.dim || "",
+    parserVersion: 'expo-mobile-shared'
+  } as any;
 }
+
