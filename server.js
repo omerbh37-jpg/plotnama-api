@@ -138,7 +138,7 @@ console.log('PG_CONNECTION_STRING =', process.env.PG_CONNECTION_STRING || '(miss
 
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
-const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 3);
+const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 30);
 
 
 // helper: issue JWT
@@ -645,6 +645,7 @@ app.get('/listings', async (req, res) => {
   `select id, society_name, phase_block, plot_size_value, plot_size_unit,
           plot_number, demand_amount_pkr,
           (attributes->>'phone') as phone,
+          (attributes->>'contact_name') as contact_name,
           notes, attributes
      from listings
     order by created_at desc
@@ -672,15 +673,26 @@ const {
   plot_number,
   demand_amount_pkr,
   phone,        // client sends "phone"
+  contact_name,   // NEW
   notes,
   attributes
 } = req.body || {};
 
 // Merge phone into attributes JSONB (no dedicated phone column in this DB)
+// Merge phone + contact_name into attributes JSONB
 const mergedAttributes =
   attributes && typeof attributes === 'object'
-    ? { ...attributes, phone: phone || null }
-    : (phone ? { phone } : null);
+    ? {
+        ...attributes,
+        phone: (phone ?? attributes.phone ?? null),
+        contact_name: (contact_name ?? attributes.contact_name ?? null)
+      }
+    : (
+        (phone || contact_name)
+          ? { phone: phone || null, contact_name: contact_name || null }
+          : null
+      );
+
 
 const { rows } = await pool.query(
   `insert into listings
